@@ -39,6 +39,7 @@ type worker struct {
 	threadID        int
 	targetOpsTickNs int64
 	opsDone         int64
+	openLoop        bool
 }
 
 func newWorker(p *properties.Properties, threadID int, threadCount int, workload ycsb.Workload, db ycsb.DB) *worker {
@@ -91,7 +92,43 @@ func newWorker(p *properties.Properties, threadID int, threadCount int, workload
 		w.targetOpsTickNs = int64(1000000.0 / w.targetOpsPerMs)
 	}
 
+	w.openLoop = w.doTransactions && p.GetBool(prop.OpenLoop, false)
+	if w.openLoop && (w.targetOpsTickNs <= 0 || w.doBatch) {
+		fmt.Printf("%s=true needs %s > 0 and no batching\n", prop.OpenLoop, prop.Target)
+		os.Exit(-1)
+	}
+
 	return w
+}
+
+// runOpenLoop issues transaction i at its intended time start + i*tick without waiting for earlier
+// ones; DbWrapper runs the DB call in the background and measures it from that intended time.
+func (w *worker) runOpenLoop(ctx context.Context) {
+	// spread the threads' schedules out, as the closed-loop throttle does
+	if w.targetOpsPerMs <= 1.0 {
+		time.Sleep(time.Duration(rand.Int63n(w.targetOpsTickNs)))
+	}
+	startTime := time.Now()
+	for w.opCount == 0 || w.opsDone < w.opCount {
+		intended := startTime.Add(time.Duration(w.opsDone * w.targetOpsTickNs))
+		if d := time.Until(intended); d > 0 {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(d):
+			}
+		}
+		err := w.workload.DoTransaction(withIntendedStart(ctx, intended), w.workDB)
+		if err != nil && !w.p.GetBool(prop.Silence, prop.SilenceDefault) {
+			fmt.Printf("operation err: %v\n", err)
+		}
+		w.opsDone++
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+	}
 }
 
 func (w *worker) throttle(ctx context.Context, startTime time.Time) {
@@ -111,6 +148,10 @@ func (w *worker) throttle(ctx context.Context, startTime time.Time) {
 }
 
 func (w *worker) run(ctx context.Context) {
+	if w.openLoop {
+		w.runOpenLoop(ctx)
+		return
+	}
 	// spread the thread operation out so they don't all hit the DB at the same time
 	if w.targetOpsPerMs > 0.0 && w.targetOpsPerMs <= 1.0 {
 		time.Sleep(time.Duration(rand.Int63n(w.targetOpsTickNs)))
@@ -219,6 +260,12 @@ func (c *Client) Run(ctx context.Context) {
 	}
 
 	wg.Wait()
+	if c.p.GetBool(prop.DoTransactions, true) && c.p.GetBool(prop.OpenLoop, false) {
+		timeout := time.Duration(c.p.GetInt64(prop.OpenLoopDrainTimeoutMs, prop.OpenLoopDrainTimeoutMsDefault)) * time.Millisecond
+		if left := drainInflight(timeout); left > 0 {
+			fmt.Printf("%d open-loop operations still in flight after %s; they are not measured\n", left, timeout)
+		}
+	}
 	if !c.p.GetBool(prop.DoTransactions, true) {
 		// when loading is finished, try to analyze table if possible.
 		if analyzeDB, ok := c.db.(ycsb.AnalyzeDB); ok {

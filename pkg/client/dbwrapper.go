@@ -51,6 +51,14 @@ func (db DbWrapper) CleanupThread(ctx context.Context) {
 }
 
 func (db DbWrapper) Read(ctx context.Context, table string, key string, fields []string) (_ map[string][]byte, err error) {
+	if start, ok := intendedStart(ctx); ok {
+		fields = append([]string(nil), fields...)
+		goAsync(func() {
+			_, err := db.DB.Read(ctx, table, key, fields)
+			measure(start, "READ", err)
+		})
+		return nil, nil
+	}
 	start := time.Now()
 	defer func() {
 		measure(start, "READ", err)
@@ -78,6 +86,14 @@ func (db DbWrapper) BatchRead(ctx context.Context, table string, keys []string, 
 }
 
 func (db DbWrapper) Scan(ctx context.Context, table string, startKey string, count int, fields []string) (_ []map[string][]byte, err error) {
+	if start, ok := intendedStart(ctx); ok {
+		fields = append([]string(nil), fields...)
+		goAsync(func() {
+			_, err := db.DB.Scan(ctx, table, startKey, count, fields)
+			measure(start, "SCAN", err)
+		})
+		return nil, nil
+	}
 	start := time.Now()
 	defer func() {
 		measure(start, "SCAN", err)
@@ -87,6 +103,13 @@ func (db DbWrapper) Scan(ctx context.Context, table string, startKey string, cou
 }
 
 func (db DbWrapper) Update(ctx context.Context, table string, key string, values map[string][]byte) (err error) {
+	if start, ok := intendedStart(ctx); ok {
+		values = copyValues(values)
+		goAsync(func() {
+			measure(start, "UPDATE", db.DB.Update(ctx, table, key, values))
+		})
+		return nil
+	}
 	start := time.Now()
 	defer func() {
 		measure(start, "UPDATE", err)
@@ -114,6 +137,13 @@ func (db DbWrapper) BatchUpdate(ctx context.Context, table string, keys []string
 }
 
 func (db DbWrapper) Insert(ctx context.Context, table string, key string, values map[string][]byte) (err error) {
+	if start, ok := intendedStart(ctx); ok {
+		values = copyValues(values)
+		goAsync(func() {
+			measure(start, "INSERT", db.DB.Insert(ctx, table, key, values))
+		})
+		return nil
+	}
 	start := time.Now()
 	defer func() {
 		measure(start, "INSERT", err)
@@ -141,6 +171,12 @@ func (db DbWrapper) BatchInsert(ctx context.Context, table string, keys []string
 }
 
 func (db DbWrapper) Delete(ctx context.Context, table string, key string) (err error) {
+	if start, ok := intendedStart(ctx); ok {
+		goAsync(func() {
+			measure(start, "DELETE", db.DB.Delete(ctx, table, key))
+		})
+		return nil
+	}
 	start := time.Now()
 	defer func() {
 		measure(start, "DELETE", err)

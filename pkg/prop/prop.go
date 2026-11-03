@@ -117,6 +117,14 @@ const (
 
 	OutputStyle = "outputstyle"
 
+	// OpenLoop issues every transaction at its scheduled (intended) time, derived from target, without
+	// waiting for earlier ones, and measures latency from that intended time (like YCSB's async bindings
+	// with measurement.interval=intended). Requires target > 0.
+	OpenLoop = "openloop"
+	// OpenLoopDrainTimeoutMs bounds the wait for in-flight operations after the schedule ends.
+	OpenLoopDrainTimeoutMs        = "openloop.drain_timeout_ms"
+	OpenLoopDrainTimeoutMsDefault = int64(600000)
+
 	// MeasurementHistogramPercentileExport properties -- related to histogram latencies exporting
 	MeasurementHistogramPercentileExport                = "histogram.percentiles.export"
 	MeasurementHistogramPercentileExportDefault         = false
