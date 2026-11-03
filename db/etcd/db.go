@@ -10,6 +10,8 @@ import (
 	"time"
 
 	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 
 	"github.com/magiconair/properties"
 	"go.etcd.io/etcd/client/pkg/v3/transport"
@@ -27,6 +29,9 @@ const (
 	// etcdPoolSize: number of clients (each its own gRPC connection); threads use them round-robin.
 	// 0 (default) keeps go-ycsb's single client shared by all threads.
 	etcdPoolSize = "etcd.pool_size"
+	// etcdLogLevel: the etcd client's own log level (default error). At warn it logs every retried RPC,
+	// which under overload is millions of lines per process.
+	etcdLogLevel = "etcd.log_level"
 )
 
 type clientKey struct{}
@@ -90,10 +95,20 @@ func getClientConfig(p *properties.Properties) (*clientv3.Config, error) {
 		tlsConfig = c
 	}
 
+	var level zapcore.Level
+	if err := level.UnmarshalText([]byte(p.GetString(etcdLogLevel, "error"))); err != nil {
+		return nil, err
+	}
+	logConfig := zap.NewProductionConfig()
+	logConfig.Level = zap.NewAtomicLevelAt(level)
+	logConfig.OutputPaths = []string{"stderr"}
+	logConfig.ErrorOutputPaths = []string{"stderr"}
+
 	return &clientv3.Config{
 		Endpoints:   strings.Split(endpoints, ","),
 		DialTimeout: dialTimeout,
 		TLS:         tlsConfig,
+		LogConfig:   &logConfig,
 	}, nil
 }
 
